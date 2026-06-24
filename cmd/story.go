@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -10,7 +11,10 @@ import (
 	"github.com/andrewnageh/vocab/internal/config"
 	"github.com/andrewnageh/vocab/internal/ollama"
 	"github.com/andrewnageh/vocab/internal/store"
+	"github.com/andrewnageh/vocab/internal/tts"
 )
+
+var storySpell bool
 
 var storyCmd = &cobra.Command{
 	Use:   "story",
@@ -53,10 +57,18 @@ var storyCmd = &cobra.Command{
 			return err
 		}
 		fmt.Println(story)
+		if storySpell {
+			sctx, scancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer scancel()
+			if err := tts.Speak(sctx, story); err != nil {
+				fmt.Fprintf(os.Stderr, "\ncould not read story aloud: %v\n", err)
+			}
+		}
 		return nil
 	},
 }
 
 func init() {
+	storyCmd.Flags().BoolVar(&storySpell, "spell", false, "read the generated story aloud using system TTS")
 	rootCmd.AddCommand(storyCmd)
 }

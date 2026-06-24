@@ -32,6 +32,18 @@ Everything runs **locally**: your collection lives in a SQLite database and the 
   ollama pull llama3.2
   ```
 
+- _(Optional)_ A system **text-to-speech** binary, used only by the **spelling
+  test** in review mode to read words aloud. `vocab` uses the first one it finds:
+
+  | Platform | Binary | How to get it |
+  | --- | --- | --- |
+  | macOS | `say` | Bundled with macOS — nothing to install. |
+  | Linux | `espeak` | `sudo apt install espeak` (or your distro's equivalent). |
+  | Linux | `spd-say` | Ships with `speech-dispatcher` (`sudo apt install speech-dispatcher`). |
+
+  If none are available, every other feature still works — only the spelling
+  test's audio is skipped.
+
 ### Quick install (recommended)
 
 Grab a prebuilt binary for your platform with a single command:
