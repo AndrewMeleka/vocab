@@ -26,17 +26,40 @@ Everything runs **locally**: your collection lives in a SQLite database and the 
 
 **Prerequisites**
 
-- [Go](https://go.dev/dl/) 1.26+
 - [Ollama](https://ollama.com) running locally with a model pulled:
 
   ```sh
   ollama pull llama3.2
   ```
 
-**Build**
+### Quick install (recommended)
+
+Grab a prebuilt binary for your platform with a single command:
 
 ```sh
-git clone https://github.com/andrewnageh/vocab.git
+curl -fsSL https://raw.githubusercontent.com/AndrewMeleka/vocab/main/install.sh | sh
+```
+
+This downloads the latest release, verifies its checksum, and installs `vocab`
+to `/usr/local/bin` (falling back to `~/.local/bin` if that isn't writable).
+
+Install a specific version or choose the location:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AndrewMeleka/vocab/main/install.sh | VERSION=v0.1.0 sh
+curl -fsSL https://raw.githubusercontent.com/AndrewMeleka/vocab/main/install.sh | BIN_DIR=$HOME/bin sh
+```
+
+Prefer not to pipe to a shell? Download the archive for your platform from the
+[releases page](https://github.com/AndrewMeleka/vocab/releases), extract it, and
+move the `vocab` binary onto your `PATH`.
+
+### Build from source
+
+Requires [Go](https://go.dev/dl/) 1.26+.
+
+```sh
+git clone https://github.com/AndrewMeleka/vocab.git
 cd vocab
 go build -o bin/vocab .
 ```

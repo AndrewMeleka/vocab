@@ -22,6 +22,12 @@ Run with no arguments to open the interactive dashboard.`,
 	SilenceUsage: true,
 }
 
+// SetVersion wires the build-time version into the root command, enabling
+// `vocab --version`.
+func SetVersion(v string) {
+	rootCmd.Version = v
+}
+
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
