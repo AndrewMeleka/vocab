@@ -13,16 +13,9 @@ import (
 //go:embed wordnet_seed.db.gz
 var seedGz []byte
 
-// seedIfEmpty populates the words table from the embedded WordNet snapshot
-// when the live DB has zero rows. Idempotent: noop on subsequent runs.
-func seedIfEmpty(conn *sql.DB) error {
-	var count int
-	if err := conn.QueryRow(`SELECT COUNT(*) FROM words`).Scan(&count); err != nil {
-		return fmt.Errorf("count words: %w", err)
-	}
-	if count > 0 {
-		return nil
-	}
+// seed populates the words table from the embedded WordNet snapshot. Called by
+// Open only when the database file was just created.
+func seed(conn *sql.DB) error {
 	tmp, err := os.CreateTemp("", "vocab-seed-*.db")
 	if err != nil {
 		return err

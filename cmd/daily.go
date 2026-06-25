@@ -14,27 +14,21 @@ import (
 )
 
 var (
-	dailyAccept bool
-	dailyLevel  string
+	dailyAdd   bool
+	dailyTopic string
+	dailyCount int
 )
 
 var dailyCmd = &cobra.Command{
 	Use:   "daily",
-	Short: "Show word of the day + suggest new words from the local dictionary",
+	Short: "Suggest new words to study (from the local dictionary, or AI by topic)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
 		if err != nil {
 			return err
 		}
-		if dailyLevel != "" {
-			levels, err := parseLevels(dailyLevel)
-			if err != nil {
-				return err
-			}
-			cfg.Level = levels
-			if err := config.Save(cfg); err != nil {
-				return fmt.Errorf("persist level: %w", err)
-			}
+		if dailyCount > 0 {
+			cfg.DailyWordCount = dailyCount
 		}
 		s, err := store.Load()
 		if err != nil {
@@ -43,68 +37,178 @@ var dailyCmd = &cobra.Command{
 		defer s.Close()
 		client := ollama.New(cfg)
 
-		printWordOfDay(s, client)
-		return printSuggestions(s, client, cfg)
+		return printSuggestions(cmd.Context(), s, client, cfg)
 	},
 }
 
-func printWordOfDay(s *store.Store, client *ollama.Client) {
-	pick := s.RandomDueCard(time.Now())
-	if pick == nil {
-		recent := s.Recent(1)
-		if len(recent) == 0 {
-			fmt.Println("No cards yet — add some with `vocab add <word>`.")
-			fmt.Println()
-			return
-		}
-		pick = &recent[0]
-	}
-	fmt.Printf("Word of the day: %s\n", pick.Word)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	wod, err := client.PickWordOfDay(ctx, []string{pick.Word})
-	if err == nil && strings.EqualFold(wod.Word, pick.Word) && wod.Reason != "" {
-		fmt.Printf("  — %s\n\n", wod.Reason)
-		return
-	}
-	fmt.Printf("  %s\n\n", pick.Definition)
+// suggestion is a display-ready word, either sampled from the local dictionary
+// (wordID set) or produced by the AI for a topic (wordID 0 until defined).
+type suggestion struct {
+	word   string
+	desc   string
+	wordID int64
 }
 
-func printSuggestions(s *store.Store, client *ollama.Client, cfg config.Config) error {
-	words, fellBack, err := s.SampleNewWords(cfg.DailyWordCount, cfg.Level)
-	if err != nil {
-		return fmt.Errorf("sample new words: %w", err)
-	}
-	if len(words) == 0 {
-		fmt.Println("No new words to suggest — the dictionary is empty or you've added everything!")
-		return nil
-	}
-	label := strings.Join(cfg.Level, ",")
-	if fellBack {
-		fmt.Printf("(no words tagged at level %s yet — falling back to any level)\n", label)
-		label = "any"
-	}
-	fmt.Printf("Suggested new words (%d) at level %s:\n", len(words), label)
-	for i, w := range words {
-		fmt.Printf("  %d. %s — %s\n", i+1, w.Name, truncate(w.Definition, 70))
+func printSuggestions(ctx context.Context, s *store.Store, client *ollama.Client, cfg config.Config) error {
+	var (
+		suggestions []suggestion
+		heading     string
+	)
+
+	if dailyTopic != "" {
+		fmt.Printf("Asking %s for words about %q…\n", cfg.Model, dailyTopic)
+
+		// Seed the exclusion set with words already in the collection so we never
+		// suggest a word the user already studies. On error, fall back to empty.
+		excluded := map[string]bool{}
+		if known, err := s.CollectionWords(); err != nil {
+			fmt.Printf("  %s\n", searchWarnStyle.Render(fmt.Sprintf("could not read collection: %v", err)))
+		} else {
+			for _, w := range known {
+				excluded[w] = true
+			}
+		}
+
+		target := cfg.DailyWordCount
+		// Ask in bounded batches rather than for the whole remainder at once: a
+		// single huge request truncates and the model repeats itself, so smaller
+		// rounds top up the list more reliably.
+		const (
+			maxRounds = 20
+			batchSize = 40
+			maxStalls = 3
+		)
+		broaden := false
+		stalls := 0
+		for round := 0; round < maxRounds; round++ {
+			need := target - len(suggestions)
+			if need <= 0 {
+				break
+			}
+			ask := need
+			if ask > batchSize {
+				ask = batchSize
+			}
+			picks, err := suggestTopicRound(ctx, client, dailyTopic, ask, excludedKeys(excluded), broaden)
+			if err != nil {
+				return fmt.Errorf("suggest topic words: %w", err)
+			}
+			before := len(suggestions)
+			for _, p := range picks {
+				norm := strings.ToLower(strings.TrimSpace(p.Word))
+				if norm == "" || excluded[norm] {
+					continue
+				}
+				excluded[norm] = true
+				suggestions = append(suggestions, suggestion{word: p.Word, desc: p.Hint})
+			}
+			if len(suggestions) == before {
+				// No new words this round. First widen the relevance bar to pull in
+				// adjacent vocabulary; only give up if broadening also dries up.
+				stalls++
+				if !broaden {
+					broaden = true
+					stalls = 0
+				} else if stalls >= maxStalls {
+					break
+				}
+			} else {
+				stalls = 0
+			}
+		}
+		if len(suggestions) < target {
+			fmt.Printf("  %s\n", searchWarnStyle.Render(fmt.Sprintf(
+				"got %d of %d — %q seems exhausted of distinct new words.",
+				len(suggestions), target, dailyTopic)))
+		}
+		heading = fmt.Sprintf("Suggested words for %q (%d):", dailyTopic, len(suggestions))
+	} else {
+		words, err := s.SampleNewWords(cfg.DailyWordCount)
+		if err != nil {
+			return fmt.Errorf("sample new words: %w", err)
+		}
+		for _, w := range words {
+			suggestions = append(suggestions, suggestion{word: w.Name, desc: w.Definition, wordID: w.ID})
+		}
+		heading = fmt.Sprintf("Suggested new words (%d):", len(suggestions))
 	}
 
-	if !dailyAccept {
-		fmt.Println("\nRun with --accept to add all suggestions to your collection.")
+	if len(suggestions) == 0 {
+		fmt.Println(searchWarnStyle.Render("No new words to suggest — the dictionary is empty or you've added everything!"))
 		return nil
 	}
+
+	fmt.Println(searchHeadingStyle.Render(heading))
+	for i, sg := range suggestions {
+		fmt.Printf("  %d. %s — %s\n", i+1, searchWordStyle.Render(sg.word), truncate(sg.desc, 70))
+	}
+
+	if !dailyAdd {
+		fmt.Println("\n" + searchWarnStyle.Render("Run with --add to add all suggestions to your collection."))
+		return nil
+	}
+
 	added := 0
-	for _, w := range words {
-		if _, err := s.CreateCard(w.ID, time.Now()); err != nil {
-			fmt.Printf("  skip %s: %v\n", w.Name, err)
+	for _, sg := range suggestions {
+		wordID := sg.wordID
+		if wordID == 0 {
+			id, err := ensureWord(ctx, client, cfg, s, sg.word)
+			if err != nil {
+				fmt.Printf("  %s\n", searchWarnStyle.Render(fmt.Sprintf("skip %s: %v", sg.word, err)))
+				continue
+			}
+			wordID = id
+		}
+		// dailyTopic is "" for local-dictionary suggestions, which stores NULL.
+		if _, err := s.CreateTopicCard(wordID, time.Now(), dailyTopic); err != nil {
+			fmt.Printf("  %s\n", searchWarnStyle.Render(fmt.Sprintf("skip %s: %v", sg.word, err)))
 			continue
 		}
 		added++
 	}
-	fmt.Printf("\nAdded %d new cards.\n", added)
-	_ = client // reserved for future on-demand enrichment of examples
+	fmt.Printf("\n%s\n", searchHeadingStyle.Render(fmt.Sprintf("Added %d new cards.", added)))
 	return nil
+}
+
+// suggestTopicRound runs a single SuggestTopic call under its own timeout so the
+// top-up loop can issue multiple rounds without leaking contexts.
+func suggestTopicRound(parentCtx context.Context, client *ollama.Client, topic string, n int, exclude []string, broaden bool) ([]ollama.Suggestion, error) {
+	ctx, cancel := context.WithTimeout(parentCtx, 90*time.Second)
+	defer cancel()
+	return client.SuggestTopic(ctx, topic, n, exclude, broaden)
+}
+
+// excludedKeys returns the keys of set as a slice for prompt construction.
+func excludedKeys(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	return out
+}
+
+// ensureWord returns the dictionary id for word, AI-defining and inserting it
+// (with examples) when it is not already in the local dictionary.
+func ensureWord(parentCtx context.Context, client *ollama.Client, cfg config.Config, s *store.Store, word string) (int64, error) {
+	if w, err := s.FindWord(word); err != nil {
+		return 0, err
+	} else if w != nil {
+		return w.ID, nil
+	}
+	ctx, cancel := context.WithTimeout(parentCtx, 90*time.Second)
+	defer cancel()
+	def, err := client.Define(ctx, word)
+	if err != nil {
+		return 0, fmt.Errorf("define: %w", err)
+	}
+	id, err := s.InsertWord(word, def.Definition, "")
+	if err != nil {
+		return 0, err
+	}
+	if err := s.AddExamples(id, def.Examples); err != nil {
+		return 0, err
+	}
+	return id, nil
 }
 
 func truncate(s string, max int) string {
@@ -115,31 +219,8 @@ func truncate(s string, max int) string {
 }
 
 func init() {
-	dailyCmd.Flags().BoolVar(&dailyAccept, "accept", false, "add all suggestions to your collection")
-	dailyCmd.Flags().StringVar(&dailyLevel, "level", "", "CEFR level(s) for suggestions, comma-separated (a1,a2,b1,b2,c1,c2). Persisted to config.toml.")
+	dailyCmd.Flags().BoolVar(&dailyAdd, "add", false, "add all suggestions to your collection")
+	dailyCmd.Flags().StringVar(&dailyTopic, "topic", "", "use AI to suggest words about a topic (e.g. --topic kitchen)")
+	dailyCmd.Flags().IntVar(&dailyCount, "count", 0, "how many words to suggest (default from config, 3)")
 	rootCmd.AddCommand(dailyCmd)
-}
-
-// parseLevels splits a comma-separated CEFR list, validates, lowercases, dedupes.
-func parseLevels(raw string) ([]string, error) {
-	seen := map[string]bool{}
-	var out []string
-	for _, part := range strings.Split(raw, ",") {
-		lv := strings.ToLower(strings.TrimSpace(part))
-		if lv == "" {
-			continue
-		}
-		if !config.ValidLevels[lv] {
-			return nil, fmt.Errorf("invalid level %q (allowed: a1, a2, b1, b2, c1, c2)", lv)
-		}
-		if seen[lv] {
-			continue
-		}
-		seen[lv] = true
-		out = append(out, lv)
-	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("no valid levels in %q", raw)
-	}
-	return out, nil
 }

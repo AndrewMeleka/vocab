@@ -15,7 +15,6 @@ type Config struct {
 	DailyWordCount  int      `toml:"daily_word_count"`
 	StoryWordCount  int      `toml:"story_word_count"`
 	BoxIntervalDays []int    `toml:"box_interval_days"`
-	Level           []string `toml:"level"`
 }
 
 func defaults() Config {
@@ -25,13 +24,7 @@ func defaults() Config {
 		DailyWordCount:  3,
 		StoryWordCount:  5,
 		BoxIntervalDays: []int{1, 3, 7, 14, 30},
-		Level:           []string{"b1", "b2"},
 	}
-}
-
-// ValidLevels are the accepted CEFR levels.
-var ValidLevels = map[string]bool{
-	"a1": true, "a2": true, "b1": true, "b2": true, "c1": true, "c2": true,
 }
 
 // Dir returns ~/.config/vocab, creating it if missing.
@@ -105,9 +98,6 @@ func Load() (Config, error) {
 	}
 	if len(cfg.BoxIntervalDays) == 0 {
 		cfg.BoxIntervalDays = defaults().BoxIntervalDays
-	}
-	if len(cfg.Level) == 0 {
-		cfg.Level = defaults().Level
 	}
 	return cfg, nil
 }

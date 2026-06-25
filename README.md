@@ -15,10 +15,10 @@ Everything runs **locally**: your collection lives in a SQLite database and the 
 - 🗂️ **Leitner spaced repetition** — cards move through 5 boxes with configurable review intervals (`1, 3, 7, 14, 30` days by default).
 - 🖥️ **Interactive dashboard** — a clean terminal UI (built with [Bubble Tea](https://github.com/charmbracelet/bubbletea)) showing your collection at a glance.
 - 📝 **Review mode** — flip cards, mark them *knew* / *forgot*, pull more examples on demand, or test your spelling.
-- 🌅 **Word of the day** + **daily suggestions** — fresh words sampled from the dictionary, filtered by CEFR level (A1–C2).
+- 🌅 **Word of the day** + **daily suggestions** — fresh words sampled from the dictionary.
 - 📖 **Micro-stories** — the model weaves your due/recent words into a short story to reinforce them in context.
 - 🔍 **Multi-word search** — look up several words in one command: `vocab search hello world`.
-- 🎚️ **Configurable** — model, host, daily/story word counts, box intervals, and learning level all live in a simple TOML file.
+- 🎚️ **Configurable** — model, host, daily/story word counts, and box intervals all live in a simple TOML file.
 
 ---
 
@@ -120,8 +120,10 @@ vocab
 
 ```sh
 vocab list --box 2                 # filter to a specific Leitner box (0–4)
-vocab daily --accept               # add all suggestions to your collection
-vocab daily --level b2,c1          # set CEFR level(s) (persisted to config)
+vocab daily --add                  # add all suggestions to your collection
+vocab daily --count 5              # suggest 5 words instead of the default 3
+vocab daily --topic kitchen        # use AI to suggest words about a topic
+vocab daily --topic kitchen --add  # …and add them (AI-defines new words first)
 vocab reset --yes                  # skip the confirmation prompt
 ```
 
@@ -165,7 +167,6 @@ model            = "llama3.2"
 daily_word_count = 3
 story_word_count = 5
 box_interval_days = [1, 3, 7, 14, 30]   # Leitner intervals per box
-level            = ["b1", "b2"]          # CEFR levels for daily suggestions
 ```
 
 | Setting | Description |
@@ -175,7 +176,6 @@ level            = ["b1", "b2"]          # CEFR levels for daily suggestions
 | `daily_word_count` | How many new words `daily` suggests. |
 | `story_word_count` | How many words `story` weaves together. |
 | `box_interval_days` | Days until next review for each of the 5 Leitner boxes. |
-| `level` | CEFR level(s) for daily suggestions — any of `a1, a2, b1, b2, c1, c2`. |
 
 ---
 

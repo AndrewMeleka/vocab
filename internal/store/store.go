@@ -30,7 +30,6 @@ type Word struct {
 	Name       string
 	Definition string
 	Type       string
-	Level      sql.NullString
 	Language   string
 	Source     string
 }
@@ -88,11 +87,11 @@ func (s *Store) Close() error { return s.conn.Close() }
 // FindWord looks up a word by name (case-insensitive). Returns nil if absent.
 func (s *Store) FindWord(name string) (*Word, error) {
 	row := s.conn.QueryRow(
-		`SELECT id, name, definition, COALESCE(type,''), level, language, source FROM words WHERE name = ?`,
+		`SELECT id, name, definition, COALESCE(type,''), language, source FROM words WHERE name = ?`,
 		strings.ToLower(strings.TrimSpace(name)),
 	)
 	var w Word
-	if err := row.Scan(&w.ID, &w.Name, &w.Definition, &w.Type, &w.Level, &w.Language, &w.Source); err != nil {
+	if err := row.Scan(&w.ID, &w.Name, &w.Definition, &w.Type, &w.Language, &w.Source); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -167,13 +166,20 @@ func (s *Store) AddExamples(wordID int64, examples []string) error {
 	return tx.Commit()
 }
 
-// CreateCard inserts a new card row pointing at wordID, due immediately.
-// Errors with a clean message if the word already has a card (UNIQUE constraint).
+// CreateCard inserts a new card row pointing at wordID, due immediately, with no
+// topic provenance. Errors with a clean message if the word already has a card
+// (UNIQUE constraint).
 func (s *Store) CreateCard(wordID int64, now time.Time) (int64, error) {
+	return s.CreateTopicCard(wordID, now, "")
+}
+
+// CreateTopicCard is like CreateCard but records where the suggestion came from.
+// An empty topic is stored as NULL (the manual/local-sample case).
+func (s *Store) CreateTopicCard(wordID int64, now time.Time, topic string) (int64, error) {
 	res, err := s.conn.Exec(
-		`INSERT INTO collections(word_id, box, added_at, next_due_at, correct_streak, wrong_count)
-		 VALUES(?, 0, ?, ?, 0, 0)`,
-		wordID, now, now,
+		`INSERT INTO collections(word_id, box, added_at, next_due_at, correct_streak, wrong_count, topic)
+		 VALUES(?, 0, ?, ?, 0, 0, ?)`,
+		wordID, now, now, nullableTopic(topic),
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
@@ -182,6 +188,13 @@ func (s *Store) CreateCard(wordID int64, now time.Time) (int64, error) {
 		return 0, err
 	}
 	return res.LastInsertId()
+}
+
+func nullableTopic(t string) any {
+	if t = strings.TrimSpace(t); t == "" {
+		return nil
+	}
+	return t
 }
 
 // Find returns the card for a given word (case-insensitive) plus a placeholder
@@ -342,49 +355,35 @@ func (s *Store) collectCards(rows *sql.Rows, withExamples bool) []Card {
 	return cards
 }
 
-// SampleNewWords picks n random words that have no card yet, optionally filtered
-// by CEFR level. If levels is non-empty but no rows match, falls back to "any".
-func (s *Store) SampleNewWords(n int, levels []string) ([]Word, bool, error) {
-	query, args := buildSampleQuery(n, levels)
-	rows, err := s.conn.Query(query, args...)
-	if err != nil {
-		return nil, false, err
-	}
-	out, err := scanWords(rows)
-	if err != nil {
-		return nil, false, err
-	}
-	if len(out) > 0 || len(levels) == 0 {
-		return out, false, nil
-	}
-	// Level filter excluded everything; retry without it.
-	rows2, err := s.conn.Query(
-		`SELECT w.id, w.name, w.definition, COALESCE(w.type,''), w.level, w.language, w.source
+// SampleNewWords picks n random words that have no card yet.
+func (s *Store) SampleNewWords(n int) ([]Word, error) {
+	rows, err := s.conn.Query(
+		`SELECT w.id, w.name, w.definition, COALESCE(w.type,''), w.language, w.source
 		 FROM words w LEFT JOIN collections c ON c.word_id = w.id
 		 WHERE c.id IS NULL ORDER BY RANDOM() LIMIT ?`, n)
 	if err != nil {
-		return nil, true, err
+		return nil, err
 	}
-	out, err = scanWords(rows2)
-	return out, true, err
+	return scanWords(rows)
 }
 
-func buildSampleQuery(n int, levels []string) (string, []any) {
-	base := `SELECT w.id, w.name, w.definition, COALESCE(w.type,''), w.level, w.language, w.source
-	         FROM words w LEFT JOIN collections c ON c.word_id = w.id
-	         WHERE c.id IS NULL`
-	args := []any{}
-	if len(levels) > 0 {
-		placeholders := strings.Repeat("?,", len(levels))
-		placeholders = placeholders[:len(placeholders)-1]
-		base += " AND w.level IN (" + placeholders + ")"
-		for _, l := range levels {
-			args = append(args, strings.ToLower(l))
-		}
+// CollectionWords returns the lowercased names of every word that has a card.
+func (s *Store) CollectionWords() ([]string, error) {
+	rows, err := s.conn.Query(
+		`SELECT w.name FROM words w JOIN collections c ON c.word_id = w.id`)
+	if err != nil {
+		return nil, err
 	}
-	base += " ORDER BY RANDOM() LIMIT ?"
-	args = append(args, n)
-	return base, args
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return out, err
+		}
+		out = append(out, strings.ToLower(strings.TrimSpace(name)))
+	}
+	return out, rows.Err()
 }
 
 func scanWords(rows *sql.Rows) ([]Word, error) {
@@ -392,7 +391,7 @@ func scanWords(rows *sql.Rows) ([]Word, error) {
 	var out []Word
 	for rows.Next() {
 		var w Word
-		if err := rows.Scan(&w.ID, &w.Name, &w.Definition, &w.Type, &w.Level, &w.Language, &w.Source); err != nil {
+		if err := rows.Scan(&w.ID, &w.Name, &w.Definition, &w.Type, &w.Language, &w.Source); err != nil {
 			return out, err
 		}
 		out = append(out, w)

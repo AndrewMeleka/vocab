@@ -7,10 +7,8 @@ CREATE TABLE IF NOT EXISTS words (
     language    TEXT    NOT NULL DEFAULT 'en',
     definition  TEXT    NOT NULL,
     type        TEXT    CHECK(type IN ('noun','verb','adj','adv','pron','prep','conj','interj','phrase')),
-    level       TEXT    CHECK(level IN ('a1','a2','b1','b2','c1','c2')),
     source      TEXT    NOT NULL DEFAULT 'ai'
 );
-CREATE INDEX IF NOT EXISTS idx_words_level ON words(level);
 
 CREATE TABLE IF NOT EXISTS examples (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,7 +26,8 @@ CREATE TABLE IF NOT EXISTS collections (
     last_reviewed_at DATETIME,
     next_due_at      DATETIME NOT NULL,
     correct_streak   INTEGER NOT NULL DEFAULT 0,
-    wrong_count      INTEGER NOT NULL DEFAULT 0
+    wrong_count      INTEGER NOT NULL DEFAULT 0,
+    topic            TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_collections_next_due ON collections(next_due_at);
 

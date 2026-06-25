@@ -52,13 +52,20 @@ type chatResp struct {
 }
 
 func (c *Client) generate(ctx context.Context, prompt string, jsonFormat bool) (string, error) {
+	return c.generateN(ctx, prompt, jsonFormat, 1024)
+}
+
+// generateN is generate with an explicit output-token budget. Long list outputs
+// (e.g. dozens of topic words in one response) need more than the 1024 default,
+// otherwise the JSON is truncated mid-array and only a partial list survives.
+func (c *Client) generateN(ctx context.Context, prompt string, jsonFormat bool, numPredict int) (string, error) {
 	body := chatReq{
 		Model:    c.model,
 		Messages: []chatMessage{{Role: "user", Content: prompt}},
 		Stream:   false,
 		Think:    false, // disable Qwen3-style thinking; required for JSON-format compat
 		Opts: map[string]any{
-			"num_predict":    1024,
+			"num_predict":    numPredict,
 			"temperature":    0.3,
 			"top_p":          0.9,
 			"top_k":          40,
@@ -221,19 +228,50 @@ Do NOT accept proper nouns, brand names, slang neologisms, or typos.`, word)
 	return v, nil
 }
 
-func (c *Client) SuggestDaily(ctx context.Context, knownWords []string, n int, levels []string) ([]Suggestion, error) {
-	levelClause := ""
-	if len(levels) > 0 {
-		levelClause = fmt.Sprintf(" Target CEFR level(s): %s.", strings.Join(levels, ", "))
-	}
-	prompt := fmt.Sprintf(`Suggest %d distinct English vocabulary words a curious learner should study today.%s
-Each entry's "word" MUST be a single English word — no spaces, no punctuation, no digits, no CEFR codes (a1/b2/etc).
+func (c *Client) SuggestDaily(ctx context.Context, knownWords []string, n int) ([]Suggestion, error) {
+	prompt := fmt.Sprintf(`Suggest %d distinct English vocabulary words a curious learner should study today.
+Each entry's "word" MUST be a single English word — no spaces, no punctuation, no digits.
 Each word MUST be unique within the response.
 They should NOT appear in this known list: %s
 Prefer rich, expressive, mid-frequency words (not too obscure, not trivial).
 Respond ONLY with JSON: {"words": [{"word": "<single english word>", "hint": "very short reason"}]}`,
-		n, levelClause, strings.Join(knownWords, ", "))
-	raw, err := c.generate(ctx, prompt, true)
+		n, strings.Join(knownWords, ", "))
+	return c.suggest(ctx, prompt)
+}
+
+// SuggestTopic asks the model for n English words related to a given topic,
+// avoiding any word in exclude. When broaden is true the relevance bar is relaxed
+// to closely-related and adjacent vocabulary — used once a narrow topic's core
+// words are exhausted and we still need to reach the requested count.
+func (c *Client) SuggestTopic(ctx context.Context, topic string, n int, exclude []string, broaden bool) ([]Suggestion, error) {
+	relevance := "Each word MUST be unique within the response and genuinely relevant to the topic.\n" +
+		"Prefer rich, expressive words a learner would find useful for the topic (not too obscure, not trivial)."
+	if broaden {
+		relevance = "Each word MUST be unique within the response.\n" +
+			"Include words closely related or adjacent to the topic — tools, materials, actions, " +
+			"qualities, and concepts one encounters in that context — so long as a learner would " +
+			"reasonably associate them with the topic."
+	}
+	prompt := fmt.Sprintf(`Suggest %d distinct English vocabulary words related to the topic %q.
+Each entry's "word" MUST be a single English word — no spaces, no punctuation, no digits.
+%s
+Respond ONLY with JSON: {"words": [{"word": "<single english word>", "hint": "very short reason it relates to the topic"}]}`,
+		n, topic, relevance)
+	if len(exclude) > 0 {
+		prompt += fmt.Sprintf("\nDo NOT repeat any of these already-known words: %s", strings.Join(exclude, ", "))
+	}
+	// Budget ~24 tokens per requested word for the JSON list, with headroom, so a
+	// large batch isn't truncated mid-array.
+	numPredict := max(n*24+256, 1024)
+	return c.suggestN(ctx, prompt, numPredict)
+}
+
+func (c *Client) suggest(ctx context.Context, prompt string) ([]Suggestion, error) {
+	return c.suggestN(ctx, prompt, 1024)
+}
+
+func (c *Client) suggestN(ctx context.Context, prompt string, numPredict int) ([]Suggestion, error) {
+	raw, err := c.generateN(ctx, prompt, true, numPredict)
 	if err != nil {
 		return nil, err
 	}

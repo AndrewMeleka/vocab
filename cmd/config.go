@@ -28,7 +28,6 @@ var configCmd = &cobra.Command{
 		fmt.Printf("Model:         %s\n", cfg.Model)
 		fmt.Printf("Daily count:   %d\n", cfg.DailyWordCount)
 		fmt.Printf("Story count:   %d\n", cfg.StoryWordCount)
-		fmt.Printf("Levels:        %v\n", cfg.Level)
 		fmt.Printf("Box intervals: %v days\n", cfg.BoxIntervalDays)
 
 		s, err := store.Load()
