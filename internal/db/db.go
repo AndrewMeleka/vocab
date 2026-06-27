@@ -10,14 +10,12 @@ import (
 )
 
 // Open opens the SQLite database at path. When the file does not yet exist it is
-// created, the schema applied, and the words table seeded from the bundled
-// WordNet snapshot. An existing file is opened as-is (schema only re-applied for
-// any missing tables); it is never re-seeded.
+// created and the schema applied. The words table is seeded from the bundled
+// WordNet snapshot whenever it is empty — so a brand-new database, or a stale
+// one left behind by an older/interrupted run, self-heals on next open. A words
+// table that already holds rows is never re-seeded.
 func Open(path string) (*sql.DB, error) {
-	fresh := false
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		fresh = true
-	} else if err != nil {
+	if _, err := os.Stat(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("stat db: %w", err)
 	}
 
@@ -30,7 +28,13 @@ func Open(path string) (*sql.DB, error) {
 		conn.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	if fresh {
+
+	var words int
+	if err := conn.QueryRow(`SELECT COUNT(*) FROM words`).Scan(&words); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("count words: %w", err)
+	}
+	if words == 0 {
 		if err := seed(conn); err != nil {
 			conn.Close()
 			return nil, fmt.Errorf("seed: %w", err)
