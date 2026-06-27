@@ -26,7 +26,7 @@ var configCmd = &cobra.Command{
 		fmt.Printf("Database file: %s\n", dbPath)
 		fmt.Printf("Ollama host:   %s\n", cfg.OllamaHost)
 		fmt.Printf("Model:         %s\n", cfg.Model)
-		fmt.Printf("Daily count:   %d\n", cfg.DailyWordCount)
+		fmt.Printf("Suggest count: %d\n", cfg.SuggestWordCount)
 		fmt.Printf("Story count:   %d\n", cfg.StoryWordCount)
 		fmt.Printf("Box intervals: %v days\n", cfg.BoxIntervalDays)
 

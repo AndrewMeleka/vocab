@@ -10,20 +10,20 @@ import (
 )
 
 type Config struct {
-	OllamaHost      string   `toml:"ollama_host"`
-	Model           string   `toml:"model"`
-	DailyWordCount  int      `toml:"daily_word_count"`
-	StoryWordCount  int      `toml:"story_word_count"`
-	BoxIntervalDays []int    `toml:"box_interval_days"`
+	OllamaHost       string `toml:"ollama_host"`
+	Model            string `toml:"model"`
+	SuggestWordCount int    `toml:"suggest_word_count"`
+	StoryWordCount   int    `toml:"story_word_count"`
+	BoxIntervalDays  []int  `toml:"box_interval_days"`
 }
 
 func defaults() Config {
 	return Config{
-		OllamaHost:      "http://localhost:11434",
-		Model:           "llama3.2",
-		DailyWordCount:  3,
-		StoryWordCount:  5,
-		BoxIntervalDays: []int{1, 3, 7, 14, 30},
+		OllamaHost:       "http://localhost:11434",
+		Model:            "llama3.2",
+		SuggestWordCount: 3,
+		StoryWordCount:   5,
+		BoxIntervalDays:  []int{1, 3, 7, 14, 30},
 	}
 }
 
@@ -90,8 +90,8 @@ func Load() (Config, error) {
 	if cfg.Model == "" {
 		cfg.Model = defaults().Model
 	}
-	if cfg.DailyWordCount <= 0 {
-		cfg.DailyWordCount = defaults().DailyWordCount
+	if cfg.SuggestWordCount <= 0 {
+		cfg.SuggestWordCount = defaults().SuggestWordCount
 	}
 	if cfg.StoryWordCount <= 0 {
 		cfg.StoryWordCount = defaults().StoryWordCount

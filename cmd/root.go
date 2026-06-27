@@ -12,7 +12,7 @@ var rootCmd = &cobra.Command{
 	Long: `vocab is a terminal vocabulary trainer.
 
 It uses a Leitner spaced-repetition algorithm to schedule reviews and an Ollama
-LLM as both dictionary and tutor (definitions, examples, word of the day,
+LLM as both dictionary and tutor (definitions, examples, word suggestions,
 micro-stories).
 
 Run with no arguments to open the interactive dashboard.`,

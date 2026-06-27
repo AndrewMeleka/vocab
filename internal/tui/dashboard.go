@@ -91,6 +91,6 @@ func (m dashboardModel) View() string {
 		b.WriteString("\n" + dimStyle.Render(m.msg) + "\n")
 	}
 
-	b.WriteString(helpStyle.Render("\n[r] review  •  run `vocab add <word>` / `daily` / `story`  •  [q] quit"))
+	b.WriteString(helpStyle.Render("\n[r] review  •  run `vocab add <word>` / `suggest` / `story`  •  [q] quit"))
 	return b.String()
 }

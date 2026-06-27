@@ -163,31 +163,6 @@ Respond ONLY with JSON: {"examples": ["...", "...", "..."]}`,
 	return out.Examples, nil
 }
 
-type WordOfDay struct {
-	Word   string `json:"word"`
-	Reason string `json:"reason"`
-}
-
-func (c *Client) PickWordOfDay(ctx context.Context, candidates []string) (WordOfDay, error) {
-	if len(candidates) == 0 {
-		return WordOfDay{}, fmt.Errorf("no candidate words")
-	}
-	prompt := fmt.Sprintf(`From this list of English words, pick ONE as "word of the day".
-Choose the most interesting based on etymological richness, vivid imagery, or unusual meaning.
-Words: %s
-Respond ONLY with JSON: {"word": "exact word from list", "reason": "one short sentence"}`,
-		strings.Join(candidates, ", "))
-	raw, err := c.generate(ctx, prompt, true)
-	if err != nil {
-		return WordOfDay{}, err
-	}
-	var w WordOfDay
-	if err := json.Unmarshal([]byte(raw), &w); err != nil {
-		return WordOfDay{}, fmt.Errorf("parse word-of-day JSON: %w (raw: %s)", err, raw)
-	}
-	return w, nil
-}
-
 func (c *Client) MicroStory(ctx context.Context, words []string) (string, error) {
 	prompt := fmt.Sprintf(`Write a vivid micro-story (under 120 words) that naturally uses ALL of these English words at least once: %s.
 Bold each target word using **double asterisks**. Return only the story, no preamble.`,
@@ -228,17 +203,6 @@ Do NOT accept proper nouns, brand names, slang neologisms, or typos.`, word)
 	return v, nil
 }
 
-func (c *Client) SuggestDaily(ctx context.Context, knownWords []string, n int) ([]Suggestion, error) {
-	prompt := fmt.Sprintf(`Suggest %d distinct English vocabulary words a curious learner should study today.
-Each entry's "word" MUST be a single English word — no spaces, no punctuation, no digits.
-Each word MUST be unique within the response.
-They should NOT appear in this known list: %s
-Prefer rich, expressive, mid-frequency words (not too obscure, not trivial).
-Respond ONLY with JSON: {"words": [{"word": "<single english word>", "hint": "very short reason"}]}`,
-		n, strings.Join(knownWords, ", "))
-	return c.suggest(ctx, prompt)
-}
-
 // SuggestTopic asks the model for n English words related to a given topic,
 // avoiding any word in exclude. When broaden is true the relevance bar is relaxed
 // to closely-related and adjacent vocabulary — used once a narrow topic's core
@@ -264,10 +228,6 @@ Respond ONLY with JSON: {"words": [{"word": "<single english word>", "hint": "ve
 	// large batch isn't truncated mid-array.
 	numPredict := max(n*24+256, 1024)
 	return c.suggestN(ctx, prompt, numPredict)
-}
-
-func (c *Client) suggest(ctx context.Context, prompt string) ([]Suggestion, error) {
-	return c.suggestN(ctx, prompt, 1024)
 }
 
 func (c *Client) suggestN(ctx context.Context, prompt string, numPredict int) ([]Suggestion, error) {

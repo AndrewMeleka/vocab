@@ -14,21 +14,21 @@ import (
 )
 
 var (
-	dailyAdd   bool
-	dailyTopic string
-	dailyCount int
+	suggestAdd   bool
+	suggestTopic string
+	suggestCount int
 )
 
-var dailyCmd = &cobra.Command{
-	Use:   "daily",
-	Short: "Suggest new words to study (from the local dictionary, or AI by topic)",
+var suggestCmd = &cobra.Command{
+	Use:   "suggest",
+	Short: "Suggest new words to study, anytime (from the local dictionary, or AI by topic)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
 		if err != nil {
 			return err
 		}
-		if dailyCount > 0 {
-			cfg.DailyWordCount = dailyCount
+		if suggestCount > 0 {
+			cfg.SuggestWordCount = suggestCount
 		}
 		s, err := store.Load()
 		if err != nil {
@@ -55,8 +55,8 @@ func printSuggestions(ctx context.Context, s *store.Store, client *ollama.Client
 		heading     string
 	)
 
-	if dailyTopic != "" {
-		fmt.Printf("Asking %s for words about %q…\n", cfg.Model, dailyTopic)
+	if suggestTopic != "" {
+		fmt.Printf("Asking %s for words about %q…\n", cfg.Model, suggestTopic)
 
 		// Seed the exclusion set with words already in the collection so we never
 		// suggest a word the user already studies. On error, fall back to empty.
@@ -69,7 +69,7 @@ func printSuggestions(ctx context.Context, s *store.Store, client *ollama.Client
 			}
 		}
 
-		target := cfg.DailyWordCount
+		target := cfg.SuggestWordCount
 		// Ask in bounded batches rather than for the whole remainder at once: a
 		// single huge request truncates and the model repeats itself, so smaller
 		// rounds top up the list more reliably.
@@ -89,7 +89,7 @@ func printSuggestions(ctx context.Context, s *store.Store, client *ollama.Client
 			if ask > batchSize {
 				ask = batchSize
 			}
-			picks, err := suggestTopicRound(ctx, client, dailyTopic, ask, excludedKeys(excluded), broaden)
+			picks, err := suggestTopicRound(ctx, client, suggestTopic, ask, excludedKeys(excluded), broaden)
 			if err != nil {
 				return fmt.Errorf("suggest topic words: %w", err)
 			}
@@ -119,11 +119,11 @@ func printSuggestions(ctx context.Context, s *store.Store, client *ollama.Client
 		if len(suggestions) < target {
 			fmt.Printf("  %s\n", searchWarnStyle.Render(fmt.Sprintf(
 				"got %d of %d — %q seems exhausted of distinct new words.",
-				len(suggestions), target, dailyTopic)))
+				len(suggestions), target, suggestTopic)))
 		}
-		heading = fmt.Sprintf("Suggested words for %q (%d):", dailyTopic, len(suggestions))
+		heading = fmt.Sprintf("Suggested words for %q (%d):", suggestTopic, len(suggestions))
 	} else {
-		words, err := s.SampleNewWords(cfg.DailyWordCount)
+		words, err := s.SampleNewWords(cfg.SuggestWordCount)
 		if err != nil {
 			return fmt.Errorf("sample new words: %w", err)
 		}
@@ -143,7 +143,7 @@ func printSuggestions(ctx context.Context, s *store.Store, client *ollama.Client
 		fmt.Printf("  %d. %s — %s\n", i+1, searchWordStyle.Render(sg.word), truncate(sg.desc, 70))
 	}
 
-	if !dailyAdd {
+	if !suggestAdd {
 		fmt.Println("\n" + searchWarnStyle.Render("Run with --add to add all suggestions to your collection."))
 		return nil
 	}
@@ -159,8 +159,8 @@ func printSuggestions(ctx context.Context, s *store.Store, client *ollama.Client
 			}
 			wordID = id
 		}
-		// dailyTopic is "" for local-dictionary suggestions, which stores NULL.
-		if _, err := s.CreateTopicCard(wordID, time.Now(), dailyTopic); err != nil {
+		// suggestTopic is "" for local-dictionary suggestions, which stores NULL.
+		if _, err := s.CreateTopicCard(wordID, time.Now(), suggestTopic); err != nil {
 			fmt.Printf("  %s\n", searchWarnStyle.Render(fmt.Sprintf("skip %s: %v", sg.word, err)))
 			continue
 		}
@@ -219,8 +219,8 @@ func truncate(s string, max int) string {
 }
 
 func init() {
-	dailyCmd.Flags().BoolVar(&dailyAdd, "add", false, "add all suggestions to your collection")
-	dailyCmd.Flags().StringVar(&dailyTopic, "topic", "", "use AI to suggest words about a topic (e.g. --topic kitchen)")
-	dailyCmd.Flags().IntVar(&dailyCount, "count", 0, "how many words to suggest (default from config, 3)")
-	rootCmd.AddCommand(dailyCmd)
+	suggestCmd.Flags().BoolVar(&suggestAdd, "add", false, "add all suggestions to your collection")
+	suggestCmd.Flags().StringVar(&suggestTopic, "topic", "", "use AI to suggest words about a topic (e.g. --topic kitchen)")
+	suggestCmd.Flags().IntVar(&suggestCount, "count", 0, "how many words to suggest (default from config, 3)")
+	rootCmd.AddCommand(suggestCmd)
 }
